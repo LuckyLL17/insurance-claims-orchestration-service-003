@@ -13,5 +13,20 @@ export class EventStore {
     return event;
   }
   list(aggregateId: string): DomainEvent[] { return [...(this.events.get(aggregateId) ?? [])].sort((a, b) => a.sequence - b.sequence); }
-  replace(aggregateId: string, events: DomainEvent[]): void { this.events.set(aggregateId, events.map((event, index) => ({ ...event, sequence: index + 1 }))); }
+
+  /**
+   * Replace an aggregate's stream (service recovery / out-of-order reorder repair).
+   * The idempotency index is rebuilt from the surviving events so duplicate notifications arriving
+   * after recovery still resolve to the already-accepted event instead of appending a second fact.
+   */
+  replace(aggregateId: string, events: DomainEvent[]): void {
+    for (const key of [...this.idempotency.keys()]) {
+      if (key.startsWith(`${aggregateId}:`)) this.idempotency.delete(key);
+    }
+    const replaced = events.map((event, index) => ({ ...event, aggregateId, sequence: index + 1 }));
+    this.events.set(aggregateId, replaced);
+    for (const event of replaced) {
+      if (event.idempotencyKey) this.idempotency.set(`${aggregateId}:${event.idempotencyKey}`, event);
+    }
+  }
 }

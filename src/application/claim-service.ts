@@ -1,11 +1,14 @@
 import { EventStore } from './event-store';
 import { EvidenceLedger } from '../domain/evidence';
 import { PolicyCatalog } from '../domain/policy';
+import { PaymentLedger, paymentFactKey } from '../domain/payment-ledger';
 import { RuleEngine } from '../domain/rules';
-import { ClaimReportedPayload, ClaimState, DomainEvent, EvidenceRecord } from '../domain/types';
+import { ClaimReportedPayload, ClaimState, DomainEvent, EvidenceRecord, PaymentEntry } from '../domain/types';
 import { newId, iso } from '../domain/ids';
 
 export class ClaimService {
+  private readonly paymentLedger = new PaymentLedger();
+
   constructor(private readonly events: EventStore, private readonly policies: PolicyCatalog, private readonly rules: RuleEngine, private readonly evidence: EvidenceLedger) {}
 
   create(input: ClaimReportedPayload, actor: string, key?: string): ClaimState {
@@ -33,7 +36,7 @@ export class ClaimService {
     return state;
   }
 
-  private empty(id: string): ClaimState { return { id, policyId: '', status: 'reported', lossAt: '', reportedAt: '', channel: '', participants: [], loss: { currency: 'CNY', gross: 0 }, evidence: [], requiredEvidence: new Set(), completedSurveys: [], pendingDocuments: [], riskSignals: [], riskScore: 0, payments: [], approvedMinor: 0, audit: [], processedEventIds: new Set(), version: 0 }; }
+  private empty(id: string): ClaimState { return { id, policyId: '', status: 'reported', lossAt: '', reportedAt: '', channel: '', participants: [], loss: { currency: 'CNY', gross: 0 }, evidence: [], requiredEvidence: new Set(), completedSurveys: [], pendingDocuments: [], riskSignals: [], riskScore: 0, payments: [], paymentSummary: { stages: {}, factsByKey: {} }, approvedMinor: 0, audit: [], processedEventIds: new Set(), processedPaymentFacts: new Set(), version: 0 }; }
   private assertExists(id: string): void { if (this.events.list(id).length === 0) throw new Error(`unknown claim ${id}`); }
 
   private apply(state: ClaimState, event: DomainEvent): void {
@@ -48,9 +51,27 @@ export class ClaimService {
     if (event.type === 'survey.completed') { state.completedSurveys = [...new Set([...state.completedSurveys, payload.taskId])]; }
     if (event.type === 'risk.assessed') { state.riskSignals = payload.signals; state.riskScore = payload.score; }
     if (event.type === 'adjustment.approved') { state.approvedMinor = payload.approvedMinor; state.requiredEvidence = new Set(payload.requiredEvidence); state.status = 'ready_for_adjustment'; }
-    if (event.type === 'payment.settled' || event.type === 'payment.reversed') { state.payments = [...state.payments, payload.payment]; state.status = payload.payment.kind === 'reversal' ? 'reopened' : 'partially_paid'; }
+    if (event.type === 'payment.authorized' || event.type === 'payment.settled' || event.type === 'payment.reversed' || event.type === 'payment.recovered') {
+      const payment = payload.payment as PaymentEntry;
+      // Defense in depth: even if two events carrying the same business fact ever reach replay
+      // (reordered recovery, duplicate notification), only one fund fact is ever appended.
+      const factKey = paymentFactKey(payment.kind, payment.sourceId);
+      if (!state.processedPaymentFacts.has(factKey)) {
+        state.processedPaymentFacts.add(factKey);
+        state.payments = [...state.payments, payment];
+      }
+    }
     if (event.type === 'claim.reopened') state.status = 'reopened';
     if (event.type === 'claim.rejected') state.status = 'rejected';
+    // Recalculate the money position from facts after every change so callers always see
+    // authorized / settled / reversed / recoverable separated, with duplicates collapsed.
+    state.paymentSummary = this.paymentLedger.summary(state.payments, { [state.loss.currency]: state.approvedMinor });
+    if (event.type === 'payment.authorized' || event.type === 'payment.settled' || event.type === 'payment.reversed' || event.type === 'payment.recovered') {
+      const payment = payload.payment as PaymentEntry;
+      if (payment.kind === 'reversal') state.status = 'reopened';
+      else if (payment.kind === 'settlement' && state.approvedMinor > 0 && (state.paymentSummary.stages[payment.amount.currency]?.netPaidMinor ?? 0) >= state.approvedMinor) state.status = 'settled';
+      else if (payment.kind === 'settlement') state.status = 'partially_paid';
+    }
     state.audit.push({ sequence: event.sequence, eventId: event.id, type: event.type, occurredAt: event.occurredAt, actor: event.actor, summary: `${event.type} accepted` });
   }
 }
