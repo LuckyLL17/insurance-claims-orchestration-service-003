@@ -30,7 +30,8 @@ export interface MonetaryAmount { currency: string; minor: number; }
 export interface LossEstimate { currency: string; gross: number; deductible?: number; liabilityShare?: number; cap?: number; }
 export interface PolicyVersion { policyId: string; version: number; effectiveFrom: string; effectiveTo?: string; coverages: string[]; deductibleMinor: number; limitMinor: number; }
 export interface EvidenceRecord { id: string; kind: string; hash: string; version: number; receivedAt: string; reviewed: boolean; accepted?: boolean; source: string; supersedes?: string; }
-export interface PaymentEntry { id: string; kind: 'authorization' | 'settlement' | 'reversal' | 'recovery'; amount: MonetaryAmount; sourceId: string; status: 'pending' | 'posted' | 'voided'; createdAt: string; }
+export interface PaymentEntry { id: string; kind: 'authorization' | 'settlement' | 'reversal' | 'recovery'; amount: MonetaryAmount; sourceId: string; status: 'pending' | 'posted' | 'voided'; createdAt: string; reverses?: string; }
+export interface PaymentSummary { authorizedMinor: number; settledMinor: number; reversedMinor: number; recoveredMinor: number; netPaidMinor: number; recoverableMinor: number; }
 export interface RuleSnapshot { version: string; frozenAt: string; ruleIds: string[]; }
 export interface RiskSignal { code: string; score: number; explanation: string; participants: string[]; }
 export interface AuditEntry { sequence: number; eventId: string; type: ClaimEventType; occurredAt: string; actor: string; summary: string; }

@@ -48,7 +48,14 @@ export class ClaimService {
     if (event.type === 'survey.completed') { state.completedSurveys = [...new Set([...state.completedSurveys, payload.taskId])]; }
     if (event.type === 'risk.assessed') { state.riskSignals = payload.signals; state.riskScore = payload.score; }
     if (event.type === 'adjustment.approved') { state.approvedMinor = payload.approvedMinor; state.requiredEvidence = new Set(payload.requiredEvidence); state.status = 'ready_for_adjustment'; }
-    if (event.type === 'payment.settled' || event.type === 'payment.reversed') { state.payments = [...state.payments, payload.payment]; state.status = payload.payment.kind === 'reversal' ? 'reopened' : 'partially_paid'; }
+    if (event.type === 'payment.authorized' || event.type === 'payment.settled' || event.type === 'payment.reversed') {
+      const payment = payload.payment;
+      const others = state.payments.filter((entry) => entry.id !== payment.id);
+      const duplicate = payment.status === 'posted' && others.some((entry) => entry.status === 'posted' && entry.kind === payment.kind && entry.sourceId === payment.sourceId);
+      state.payments = duplicate ? others : [...others, payment];
+      if (!duplicate && payment.kind === 'reversal') state.status = 'reopened';
+      if (!duplicate && payment.kind === 'settlement') state.status = 'partially_paid';
+    }
     if (event.type === 'claim.reopened') state.status = 'reopened';
     if (event.type === 'claim.rejected') state.status = 'rejected';
     state.audit.push({ sequence: event.sequence, eventId: event.id, type: event.type, occurredAt: event.occurredAt, actor: event.actor, summary: `${event.type} accepted` });

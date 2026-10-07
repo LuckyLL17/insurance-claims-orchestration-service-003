@@ -25,6 +25,8 @@ export async function route(req: IncomingMessage, res: ServerResponse, app: AppC
     if (method === 'POST' && path[2] === 'risk') return json(res, 200, app.risks.assess(id, 'api'));
     if (method === 'GET' && path[2] === 'risk') return json(res, 200, { relatedClaims: app.risks.related(id), state: app.claims.get(id) });
     if (method === 'POST' && path[2] === 'payments') return json(res, 200, app.payments.settle(id, input, 'api'));
+    if (method === 'GET' && path[2] === 'payments') return json(res, 200, app.payments.summary(id));
+    if (method === 'POST' && path[2] === 'authorizations') return json(res, 200, app.payments.authorize(id, input, 'api'));
     if (method === 'POST' && path[2] === 'reversals') return json(res, 200, app.payments.reverse(id, input, 'api'));
     if (method === 'POST' && path[2] === 'tasks') return json(res, 201, app.tasks.create(id, input.kind));
     if (method === 'GET' && path[2] === 'tasks') return json(res, 200, app.tasks.list(id));
